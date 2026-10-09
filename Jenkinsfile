@@ -1,4 +1,3 @@
-
 pipeline {
     agent any
 
@@ -15,25 +14,37 @@ pipeline {
                     python3 -m venv .venv
                     .venv/bin/pip install -r requirements.txt
                     .venv/bin/pip install pytest bandit pip-audit
+                    mkdir -p reports
                 '''
             }
         }
 
         stage('Automated Tests') {
             steps {
-                sh '.venv/bin/pytest -v'
+                sh '''
+                    .venv/bin/pytest -v \
+                        --junitxml=reports/pytest-report.xml
+                '''
             }
         }
 
         stage('Code Security Scan') {
             steps {
-                sh '.venv/bin/bandit -r app.py'
+                sh '''
+                    .venv/bin/bandit -r app.py \
+                        -f json \
+                        -o reports/bandit-report.json
+                '''
             }
         }
 
         stage('Dependency Audit') {
             steps {
-                sh '.venv/bin/pip-audit -r requirements.txt'
+                sh '''
+                    .venv/bin/pip-audit -r requirements.txt \
+                        --format json \
+                        --output reports/dependency-audit.json
+                '''
             }
         }
 
@@ -59,7 +70,27 @@ pipeline {
 
     post {
         always {
-            echo 'QRForge CI/CD pipeline finished.'
+            script {
+                def result = currentBuild.currentResult ?: 'UNKNOWN'
+
+                sh """
+                    mkdir -p reports
+                    cat > reports/pipeline-summary.txt <<'EOF'
+                    QRForge CI/CD Pipeline Report
+                    Build Number: ${env.BUILD_NUMBER}
+                    Build URL: ${env.BUILD_URL}
+                    Final Status: ${result}
+                    EOF
+                """
+
+                archiveArtifacts artifacts: 'reports/*',
+                                 allowEmptyArchive: true
+
+                junit testResults: 'reports/pytest-report.xml',
+                      allowEmptyResults: true
+
+                echo 'QRForge CI/CD pipeline finished.'
+            }
         }
 
         success {
@@ -67,7 +98,7 @@ pipeline {
         }
 
         failure {
-            echo 'Pipeline failed. Check the stage console output.'
+            echo 'Pipeline failed. Check the stage console output and archived reports.'
         }
     }
 }
